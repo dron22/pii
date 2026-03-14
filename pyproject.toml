@@ -26,3 +26,32 @@ pii = "pii.cli:cli"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["pii*"]
+
+[tool.pytest.ini_options]
+testpaths = ["pii"]
+python_files = ["*_test.py"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [".eggs", ".git", ".venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+"*_test.py" = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["pii"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+exclude = [".*_test\\.py$"]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+warn_return_any = true
+
