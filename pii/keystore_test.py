@@ -28,9 +28,10 @@ def test_roundtrip():
         path = f.name
     encrypt_keyfile(_findings(), "pw123", path)
     key_map = decrypt_keyfile(path, "pw123")
-    assert key_map["[NAME_1]"]["value"] == "Lara Meier"
-    assert key_map["[AHV_1]"]["value"] == "756.9217.4821.09"
-    assert key_map["[IBAN_1]"]["value"] == "CH44 3199 9123 0000 5512 8"
+    tokens = key_map["tokens"]
+    assert tokens["[NAME_1]"]["value"] == "Lara Meier"
+    assert tokens["[AHV_1]"]["value"] == "756.9217.4821.09"
+    assert tokens["[IBAN_1]"]["value"] == "CH44 3199 9123 0000 5512 8"
 
 
 def test_wrong_password_raises():
@@ -55,5 +56,6 @@ def test_key_map_has_font_info():
         path = f.name
     encrypt_keyfile(_findings(), "pw", path)
     key_map = decrypt_keyfile(path, "pw")
-    assert "font_name" in key_map["[NAME_1]"]
-    assert "font_size" in key_map["[NAME_1]"]
+    tokens = key_map["tokens"]
+    assert "font_name" in tokens["[NAME_1]"]
+    assert "font_size" in tokens["[NAME_1]"]
