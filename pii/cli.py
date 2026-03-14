@@ -88,8 +88,8 @@ def redact(
             "Enter encryption password for key file", hide_input=True, confirmation_prompt="Confirm password"
         )
 
-    redact_pdf(str(input_pdf), tokenised, str(redacted_path))
-    encrypt_keyfile(tokenised, password, str(key_path))
+    page_content = redact_pdf(str(input_pdf), tokenised, str(redacted_path))
+    encrypt_keyfile(tokenised, password, str(key_path), page_content=page_content)
     report(tokenised, findings, report_file=str(report_file) if report_file else None)
 
     click.echo("\nRedaction complete.")
