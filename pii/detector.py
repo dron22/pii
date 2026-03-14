@@ -1,12 +1,16 @@
 """Detect PII in extracted page text and map findings back to bounding boxes."""
 
+import logging
+import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer, RecognizerRegistry
 from presidio_analyzer.nlp_engine import NlpEngineProvider
 
 from pii.extractor import Char, PageText
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -109,6 +113,74 @@ def _email_recogniser() -> PatternRecognizer:
     )
 
 
+# ── DOB detection ──────────────────────────────────────────────────────────────
+
+# Finds all date-like values in text
+_ANY_DATE_REGEX = re.compile(
+    r"\b\d{4}-\d{2}-\d{2}\b"
+    r"|\b\d{1,2}\.\d{1,2}\.\d{4}\b"
+    r"|\b\d{1,2}/\d{1,2}/\d{4}\b"
+    r"|\b\d{1,2}\s+(?:January|February|March|April|May|June|July|August"
+    r"|September|October|November|December)\s+\d{4}\b"
+    r"|\b(?:January|February|March|April|May|June|July|August"
+    r"|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b",
+    re.IGNORECASE,
+)
+
+# Labels that identify a date as a date of birth
+_BIRTH_LABEL_REGEX = re.compile(
+    r"(?:date\s+of\s+birth|birthdate|birthday|\bdob\b|\bborn\b"
+    r"|geburtsdatum|geburtstag|\bgeboren\b"
+    r"|date\s+de\s+naissance|\bnaissance\b|\bn[ée]e?\b"
+    r"|data\s+di\s+nascita|\bnascita\b|\bnato\b|\bnata\b)"
+    r"[^0-9\n]{0,30}",
+    re.IGNORECASE,
+)
+
+# Labels that identify a date as definitively NOT a date of birth
+_NON_BIRTH_LABEL_REGEX = re.compile(
+    r"(?:invoice\s+date|notice\s+date|service\s+date|admission\s+date"
+    r"|discharge\s+date|issue\s+date|payment\s+date|due\s+date"
+    r"|generated|effective|report\s+date|statement\s+date|order\s+date"
+    r"|claim\s+date|visit\s+date|procedure\s+date|start\s+date|end\s+date"
+    r"|expir\w+\s+date|renewal\s+date|treatment\s+date|appointment\s+date)"
+    r"[^0-9\n]{0,30}",
+    re.IGNORECASE,
+)
+
+_LABEL_WINDOW = 80  # chars to look back for a label
+_DOB_ANCHOR_TEXT = "date of birth born birthday geburtsdatum"
+_DOB_EMBEDDING_THRESHOLD = 0.70
+
+_dob_anchor_doc: Optional[Any] = None
+
+
+def _get_dob_anchor(nlp: Any) -> Optional[Any]:
+    global _dob_anchor_doc
+    if _dob_anchor_doc is None:
+        _dob_anchor_doc = nlp(_DOB_ANCHOR_TEXT)
+    return _dob_anchor_doc
+
+
+def _classify_date_label(preceding: str) -> str:
+    """Return 'dob', 'non_dob', or 'unknown' based on the last label before the date.
+
+    Taking the last match means the label closest to the date wins, so a
+    'Date of birth' earlier on the same page cannot promote 'Notice date: <value>'.
+    """
+    birth_matches = list(_BIRTH_LABEL_REGEX.finditer(preceding))
+    non_birth_matches = list(_NON_BIRTH_LABEL_REGEX.finditer(preceding))
+
+    last_birth = birth_matches[-1].end() if birth_matches else -1
+    last_non_birth = non_birth_matches[-1].end() if non_birth_matches else -1
+
+    if last_birth == -1 and last_non_birth == -1:
+        return "unknown"
+    return "dob" if last_birth > last_non_birth else "non_dob"
+
+
+# ── Presidio engine ────────────────────────────────────────────────────────────
+
 # Map Presidio entity types to our typed token prefixes
 _ENTITY_TO_TOKEN_TYPE = {
     "PERSON": "NAME",
@@ -117,7 +189,6 @@ _ENTITY_TO_TOKEN_TYPE = {
     "PHONE_NUMBER": "PHONE",
     "IBAN_CODE": "IBAN",
     "IBAN": "IBAN",
-    "DATE_TIME": "DOB",
     "LOCATION": "ADDRESS",
     "AHV": "AHV",
     "INSURANCE_NUM": "INSURANCE",
@@ -130,14 +201,19 @@ _ENTITY_TO_TOKEN_TYPE = {
 
 _SUPPORTED_ENTITIES = list(_ENTITY_TO_TOKEN_TYPE.keys())
 
-# Lazy-initialised engine (loading spaCy model is slow)
 _engine: Optional[AnalyzerEngine] = None
+_spacy_nlp: Optional[Any] = None
 
 
 def _get_engine() -> AnalyzerEngine:
-    global _engine
+    global _engine, _spacy_nlp
     if _engine is None:
         _engine = _build_engine()
+        try:
+            # Reuse the spaCy model already loaded by Presidio — avoids a second load
+            _spacy_nlp = _engine.nlp_engine.nlp["en"]  # type: ignore[attr-defined]
+        except (AttributeError, KeyError):
+            pass  # embedding fallback silently disabled
     return _engine
 
 
@@ -153,8 +229,8 @@ def detect(pages: list[PageText]) -> list[Finding]:
         text = page.text
         char_index = _build_char_index(page.chars)
 
+        # Presidio-based detection (everything except DOB)
         results = engine.analyze(text=text, language="en", entities=_SUPPORTED_ENTITIES)
-
         for result in results:
             value = text[result.start : result.end].strip()
             if not value:
@@ -162,10 +238,8 @@ def detect(pages: list[PageText]) -> list[Finding]:
             bbox = _span_to_bbox(char_index, result.start, result.end)
             if bbox is None:
                 continue
-
             token_type = _ENTITY_TO_TOKEN_TYPE.get(result.entity_type, result.entity_type)
             font_name, font_size = _find_font(page.chars, result.start, result.end)
-
             all_findings.append(
                 Finding(
                     type=token_type,
@@ -173,6 +247,59 @@ def detect(pages: list[PageText]) -> list[Finding]:
                     page=page.page_num,
                     bbox=bbox,
                     confidence=result.score,
+                    font_name=font_name,
+                    font_size=font_size,
+                )
+            )
+
+        # DOB detection: regex classification first, embedding fallback for unknowns
+        for match in _ANY_DATE_REGEX.finditer(text):
+            value = match.group().strip()
+            preceding = text[max(0, match.start() - _LABEL_WINDOW) : match.start()]
+            label = _classify_date_label(preceding)
+
+            log.debug(
+                "DOB candidate %r on page %d — label=%s | preceding: %r",
+                value,
+                page.page_num,
+                label,
+                preceding.strip(),
+            )
+
+            if label == "non_dob":
+                log.debug("  -> skip (non-birth label)")
+                continue
+
+            if label == "unknown":
+                if _spacy_nlp is None:
+                    log.debug("  -> skip (no spaCy model for embedding fallback)")
+                    continue
+                preceding_stripped = preceding.strip()
+                sim = (
+                    float(_spacy_nlp(preceding_stripped).similarity(_get_dob_anchor(_spacy_nlp)))
+                    if preceding_stripped
+                    else 0.0
+                )
+                log.debug("  -> embedding similarity=%.3f threshold=%.2f", sim, _DOB_EMBEDDING_THRESHOLD)
+                if sim < _DOB_EMBEDDING_THRESHOLD:
+                    log.debug("  -> skip (below threshold)")
+                    continue
+                log.debug("  -> accept (embedding)")
+            else:
+                log.debug("  -> accept (birth label)")
+
+            bbox = _span_to_bbox(char_index, match.start(), match.end())
+            if bbox is None:
+                continue
+            font_name, font_size = _find_font(page.chars, match.start(), match.end())
+            confidence = 0.85 if label == "dob" else 0.65
+            all_findings.append(
+                Finding(
+                    type="DOB",
+                    value=value,
+                    page=page.page_num,
+                    bbox=bbox,
+                    confidence=confidence,
                     font_name=font_name,
                     font_size=font_size,
                 )

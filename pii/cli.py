@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 
@@ -13,8 +14,12 @@ from pii.tokeniser import tokenise
 
 
 @click.group()
-def cli() -> None:
+@click.option("--debug", is_flag=True, default=False, help="Enable debug logging (shows DOB classification decisions).")
+@click.pass_context
+def cli(ctx: click.Context, debug: bool) -> None:
     """Local PII redaction tool for PDFs. All processing is local — no data leaves your device."""
+    if debug:
+        logging.basicConfig(level=logging.DEBUG, format="%(name)s %(levelname)s %(message)s")
 
 
 @cli.command()
