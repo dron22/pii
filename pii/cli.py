@@ -100,6 +100,68 @@ def redact(
     click.echo("\nKeep your key file safe. Without it, redaction cannot be reversed.")
 
 
+def _redact_for_hook(file_path: str, password: str) -> str:
+    """Redact a PDF if not already redacted. Returns the redacted path."""
+    redacted_path = file_path[:-4] + "_redacted.pdf"
+    if not Path(redacted_path).exists():
+        pages = extract(file_path)
+        findings = detect(pages)
+        if findings:
+            tokenise(findings)
+            key_path = file_path[:-4] + "_redacted.key.enc"
+            page_content = redact_pdf(str(file_path), findings, str(redacted_path))
+            encrypt_keyfile(findings, password, key_path, page_content=page_content)
+    return redacted_path if Path(redacted_path).exists() else file_path
+
+
+@cli.command()
+@click.option(
+    "--password", envvar="PII_PASSWORD", required=True, help="Encryption password (or set PII_PASSWORD env var)."
+)
+def claude(password: str) -> None:
+    """Claude Code PreToolUse hook — redacts PDFs before the model reads them.
+
+    Add to ~/.claude/settings.json:
+
+        "command": "PII_PASSWORD=secret pii claude"
+    """
+    import json
+
+    data = json.load(sys.stdin)
+    file_path = data.get("tool_input", {}).get("file_path", "")
+
+    if data.get("tool_name") != "Read" or not file_path.endswith(".pdf"):
+        return
+
+    redacted_path = _redact_for_hook(file_path, password)
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                    "updatedInput": {"file_path": redacted_path},
+                }
+            }
+        )
+    )
+
+
+@cli.command(name="help")
+@click.pass_context
+def help_cmd(ctx: click.Context) -> None:
+    """Show this help message and exit."""
+    click.echo(cli.get_help(ctx))
+
+
+@cli.command()
+def version() -> None:
+    """Show the version and exit."""
+    import importlib.metadata
+
+    click.echo(importlib.metadata.version("piibyebye"))
+
+
 @cli.command()
 def web() -> None:
     """Launch the web UI."""
