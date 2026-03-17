@@ -6,12 +6,14 @@ Detects and blacks out PII fields, produces a redacted PDF, and saves an encrypt
 
 ---
 
-## Setup
+## Quick start — Web UI
 
 ```bash
-pip install -e ".[dev]"
-python -m spacy download en_core_web_lg
+pip install git+https://github.com/dron22/pii
+pii web
 ```
+
+Opens at `http://localhost:7860`. Upload a PDF, review detected fields, download the redacted PDF and key file. No command line knowledge needed.
 
 ---
 
@@ -107,26 +109,12 @@ The key file is AES-256-GCM encrypted using a password you choose. It maps each 
 ## Development
 
 ```bash
+pip install -e ".[dev]"
+```
+
+```bash
 make test       # run all tests
 make lint       # check formatting, linting, types
 make lint-fix   # auto-fix formatting and lint issues
 make clean      # remove caches
 ```
-
----
-
-## Architecture
-
-```
-pii/
-├── cli.py          entry point — click commands
-├── extractor.py    pymupdf text + bbox extraction
-├── detector.py     Presidio PII detection + custom Swiss recognisers
-├── reviewer.py     stdout summary + confirmation prompt
-├── tokeniser.py    token generation and deduplication
-├── redactor.py     PDF black box drawing + text overlay unredaction
-├── keystore.py     AES-GCM key file encryption/decryption
-└── reporter.py     audit summary
-```
-
-**Stack:** Python 3.11 · pymupdf · Microsoft Presidio · spaCy · cryptography · click

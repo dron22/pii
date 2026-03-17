@@ -101,6 +101,14 @@ def redact(
 
 
 @cli.command()
+def web() -> None:
+    """Launch the web UI."""
+    from pii.app import demo
+
+    demo.launch()
+
+
+@cli.command()
 @click.argument("redacted_pdf", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.argument("key_file", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.option(
