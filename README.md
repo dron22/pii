@@ -115,6 +115,21 @@ The key file is AES-256-GCM encrypted using a password you choose. It maps each 
 
 ---
 
+## Sample documents
+
+The `demo/` folder contains synthetic PDFs you can use to try the tool right away:
+
+| File | Contents |
+|---|---|
+| `sample_hospital_invoice_synthetic.pdf` | Hospital invoice with names, dates, IBANs |
+| `sample_social_security_notice_synthetic.pdf` | Social security letter with AHV number and address |
+
+```bash
+pii redact demo/sample_hospital_invoice_synthetic.pdf
+```
+
+---
+
 ## Development
 
 ```bash
