@@ -13,6 +13,8 @@ Redact personal information from PDFs locally. No data leaves your device.
 
 Detects and blacks out PII fields, produces a redacted PDF, and saves an encrypted key file so you can restore the original values later.
 
+[How it works](docs/concept.md) — concept overview and design rationale
+
 ---
 
 ## Quick start — Web UI
